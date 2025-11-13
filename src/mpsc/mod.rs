@@ -281,6 +281,47 @@ impl<T> Sender<T> {
     }
 }
 
+impl<T> Clone for BoundedSenderInner<T> {
+    fn clone(&self) -> Self {
+        let mut curr = self.inner.num_senders.load(Ordering::SeqCst);
+
+        loop {
+            let next = curr + 1;
+            match self.inner.num_senders.compare_exchange(
+                curr,
+                next,
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            ) {
+                Ok(_) => {
+                    return Self {
+                        inner: self.inner.clone(),
+                        sender_task: Arc::new(Mutex::new(SenderTask::new())),
+                        maybe_parked: false,
+                    };
+                }
+                Err(actual) => curr = actual,
+            }
+        }
+    }
+}
+
+impl<T> Drop for BoundedSenderInner<T> {
+    fn drop(&mut self) {
+        let prev = self.inner.num_senders.fetch_sub(1, Ordering::SeqCst);
+
+        if prev == 1 {
+            self.close_channel();
+        }
+    }
+}
+
+impl<T> Clone for Sender<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
 impl<T> Future for SendFut<'_, T>
 where
     T: Send + Unpin,
@@ -304,6 +345,7 @@ where
         }
     }
 }
+
 /*
  *
  * ===== impl Receiver =====
