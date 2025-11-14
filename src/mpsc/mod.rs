@@ -372,7 +372,7 @@ impl<T> Receiver<T> {
             None => return Poll::Ready(None),
         };
         // pop data
-        match inner.queue.pop() {
+        match inner.queue.pop_spin() {
             Some(v) => {
                 self.unpark_one();
                 self.dec_num_msg();
@@ -392,7 +392,7 @@ impl<T> Receiver<T> {
     fn unpark_one(&self) {
         if let Some(inner) = self.inner.as_ref() {
             #[warn(clippy::collapsible_if)]
-            if let Some(task) = inner.parked_queue.pop() {
+            if let Some(task) = inner.parked_queue.pop_spin() {
                 task.lock().unwrap().notify()
             }
         }
@@ -408,7 +408,7 @@ impl<T> Receiver<T> {
         if let Some(inner) = self.inner.as_ref() {
             inner.close();
 
-            while let Some(task) = inner.parked_queue.pop() {
+            while let Some(task) = inner.parked_queue.pop_spin() {
                 task.lock().unwrap().notify();
             }
         }
@@ -465,6 +465,9 @@ impl<T> BoundedInner<T> {
         self.state.fetch_and(!OPEN_MASK, Ordering::SeqCst);
     }
 }
+
+unsafe impl<T: Send> Send for BoundedInner<T> {}
+unsafe impl<T: Sync> Sync for BoundedInner<T> {}
 
 /*
  *
